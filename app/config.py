@@ -1,23 +1,33 @@
 # Mindsnap团队的电影推荐系统分团队 
+# 配置文件：存储系统运行所需的全局配置参数
 
+############################################################
 # 数据库配置
+# 这些参数用于建立与MySQL数据库的连接
+############################################################
 DB_CONFIG = {
-    'host': 'localhost',  # 部署时可能为服务器IP或127.0.0.1
-    'user': 'movie_rec_user',
-    'password': 'MovieRecDbP@ssw0rd',  # 生产环境中应使用更安全的方式存储密码
-    'db': 'movie_recommendation_system',
-    'charset': 'utf8mb4',
-    'cursorclass': 'pymysql.cursors.DictCursor'  # 方便将查询结果转为字典
+    'host': 'localhost',  # 数据库服务器地址，本地开发时为localhost，部署到服务器时可能需要修改为实际IP
+    'user': 'movie_rec_user',  # 数据库用户名，该用户需要有对电影推荐系统数据库的读写权限
+    'password': 'MovieRecDbP@ssw0rd',  # 数据库密码，生产环境中应使用环境变量或加密存储方式以提高安全性
+    'db': 'movie_recommendation_system',  # 数据库名称，存储系统所有数据（电影、用户、评分等）
+    'charset': 'utf8mb4',  # 字符集，utf8mb4支持完整的Unicode字符（包括emoji表情等）
+    'cursorclass': 'pymysql.cursors.DictCursor'  # 使用字典游标，查询结果将以字典形式返回，可通过字段名访问值
 }
 
+############################################################
 # 微信公众号配置
-WECHAT_TOKEN = "HelloMindsnap"  # 微信公众号开发者配置中的Token
-# WECHAT_APPID = "YOUR_APPID"  # 如果需要主动调用API
-# WECHAT_APPSECRET = "YOUR_APPSECRET"  # 如果需要主动调用API
-# WECHAT_ENCODING_AES_KEY = "zBgVlxIm7Wag3cn3ZMHICuT8qxUU5Kdo9lcr4MS3pP9"  # 如果使用安全模式
+# 用于与微信公众平台进行安全通信
+############################################################
+WECHAT_TOKEN = "HelloMindsnap"  # 微信公众号开发者配置中的Token，用于验证请求是否来自微信服务器
+# WECHAT_APPID = "YOUR_APPID"  # 公众号的AppID，如需主动调用微信API时使用，当前未启用
+# WECHAT_APPSECRET = "YOUR_APPSECRET"  # 公众号的AppSecret，与AppID配合使用进行身份验证，当前未启用
+# WECHAT_ENCODING_AES_KEY = "zBgVlxIm7Wag3cn3ZMHICuT8qxUU5Kdo9lcr4MS3pP9"  # 消息加解密密钥，使用安全模式时需要，当前未启用
 
-# 系统配置
-DEFAULT_RECOMMENDATIONS_COUNT = 5  # 默认推荐电影数量
-MAX_SEARCH_RESULTS = 5  # 模糊搜索时返回的最大结果数
-SIMILAR_USERS_COUNT = 10  # 协同过滤算法中寻找的相似用户数量
-MIN_COMMON_RATINGS = 2  # 判断用户相似度时至少需要的共同评分电影数 
+############################################################
+# 推荐系统参数配置
+# 控制推荐算法的行为和结果
+############################################################
+DEFAULT_RECOMMENDATIONS_COUNT = 3  # 默认一次返回的推荐电影数量，影响用户体验（太多会使消息过长）
+MAX_SEARCH_RESULTS = 3  # 模糊搜索时返回的最大结果数，防止搜索结果过多导致微信消息超长
+SIMILAR_USERS_COUNT = 10  # 协同过滤算法中寻找的相似用户数量，影响推荐多样性和准确性
+MIN_COMMON_RATINGS = 2  # 判断用户相似度时至少需要的共同评分电影数，值越大相似度计算越准确但可用邻居越少 
