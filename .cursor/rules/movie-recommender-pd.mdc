@@ -1,0 +1,672 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+好的，这篇论文描述了一个非常经典且有趣的机器学习项目：基于协同过滤的个性化电影推荐系统，并通过微信公众号作为前端交互。我会为你撰写一份详尽的项目文档，指导Cursor逐步实现这个系统。
+
+**请注意：** 这份文档是给Cursor的指令和说明，它本身不包含Python代码、Mermaid图或UI截图（除了SQL建表语句）。Cursor在执行过程中，应自行记录其开发步骤和代码片段到项目的README.md或特定的日志文件中。
+
+---
+
+# 基于机器学习的个性化电影推荐系统 - 项目文档
+
+**项目GitHub地址:** [https://github.com/Boulea7/Movie_recommender_wechat](https://github.com/Boulea7/Movie_recommender_wechat)
+
+**文档版本:** 1.0
+**最后更新日期:** (由Cursor填写实际日期)
+**撰写人:** (由Cursor填写，例如：AI助手 via 用户指令)
+
+## 0. 项目概述
+
+### 0.1 项目简介
+本项目旨在根据用户历史行为数据，利用机器学习算法（主要是协同过滤），为用户提供个性化的电影推荐。系统将通过微信公众号与用户进行交互，用户可以搜索电影、评价电影，并获取个性化推荐。
+
+### 0.2 项目目标
+1.  搭建一个功能完整的电影推荐系统后端服务。
+2.  实现基于用户的协同过滤推荐算法。
+3.  实现基于内容的推荐算法以解决冷启动问题。
+4.  通过微信公众号平台，提供用户友好的交互界面。
+5.  确保系统在阿里云Ubuntu服务器上稳定部署和运行。
+
+### 0.3 技术栈
+*   **后端语言:** Python 3.8+ (推荐使用Python 3.9或3.10)
+*   **Web框架:** web.py (版本根据`pip install web.py`最新稳定版，或指定如`web.py==0.62`)
+*   **数据库:** MySQL 8.0 (或兼容的MariaDB版本)
+*   **Python库:**
+    *   `pymysql` (数据库连接)
+    *   `requests` (HTTP请求，论文中爬虫部分提及，此处可用于未来扩展)
+    *   `lxml` (XML/HTML解析，微信消息交互和未来爬虫扩展)
+    *   `cryptography` (如果需要处理微信消息加解密，通常微信官方SDK会封装)
+*   **服务器:** 阿里云ECS，Ubuntu 20.04 LTS或更高版本
+*   **前端交互:** 微信公众号平台
+
+### 0.4 项目范围 (根据论文核心功能)
+1.  **用户管理:**
+    *   新用户关注公众号时自动注册（记录微信用户OpenID）。
+    *   发送使用说明给新关注用户。
+2.  **电影信息管理:**
+    *   存储电影基本信息（ID、名称、评分、演员、简介等）。
+    *   （初期）手动填充至少200条详细的电影测试数据。
+3.  **核心交互功能 (通过微信公众号文本消息):**
+    *   **搜索电影:** 用户输入电影名，返回电影详细信息（支持精确和模糊搜索）。
+    *   **评价电影:** 用户输入“评价 电影名 评分”，记录用户评分。
+    *   **获取推荐:** 用户输入“推荐”，返回个性化电影列表。
+4.  **推荐算法:**
+    *   **基于用户的协同过滤 (User-CF):** 作为主要的推荐算法。
+    *   **基于内容的推荐 (Content-Based):** 作为冷启动或协同过滤无结果时的补充，例如推荐豆瓣高分电影或随机热门。
+5.  **系统部署:**
+    *   在阿里云Ubuntu服务器上部署。
+    *   编写详细的部署脚本和手动部署指南。
+
+## 1. 环境准备与配置
+
+### 1.1 本地开发环境
+*   **Python:** 安装Python 3.8+，并配置好pip。
+*   **虚拟环境:** 强烈建议使用虚拟环境。
+    ```bash
+    python -m venv .venv
+    source .venv/bin/activate  # Linux/macOS
+    # .venv\Scripts\activate    # Windows
+    pip install web.py pymysql requests lxml cryptography
+    ```
+*   **MySQL服务器:**
+    *   **版本:** MySQL 8.0 或兼容版本。
+    *   **用户:** 创建一个专门用于本项目的数据库用户。
+        *   用户名: `movie_rec_user`
+        *   密码: `MovieRecDbP@ssw0rd` (请在实际部署时使用更安全的密码，并配置在环境变量或配置文件中)
+    *   **数据库:** 创建一个数据库。
+        *   数据库名: `movie_recommendation_system`
+        *   字符集: `utf8mb4`
+*   **Git:** 安装Git，用于版本控制。
+
+### 1.2 阿里云服务器 (Ubuntu)
+*   **操作系统:** Ubuntu 20.04 LTS 或更高版本。
+*   **实例配置:** 至少1核CPU, 1GB RAM (根据预算和预期负载调整)。
+*   **安全组配置:**
+    *   开放TCP端口 `22` (用于SSH)。
+    *   开放TCP端口 `80` (用于微信公众号HTTP接入)。
+    *   (可选) 开放TCP端口 `3306` (如果MySQL部署在云服务器上且本地需要访问，但不推荐公网暴露3306，建议通过SSH隧道或仅限服务器内部访问)。
+*   **必备软件安装 (在服务器上执行):**
+    ```bash
+    sudo apt update
+    sudo apt install -y python3-pip python3-venv git nginx # Nginx可选，用于反向代理和HTTPS，但微信HTTP只用80
+    # MySQL Server (如果数据库也部署在这台服务器上)
+    # sudo apt install -y mysql-server
+    # sudo mysql_secure_installation # 进行安全配置
+    ```
+
+### 1.3 微信公众号配置
+*   **类型:** 个人订阅号或服务号 (个人订阅号权限受限，但符合论文描述)。
+*   **开发者基本配置:**
+    *   **服务器地址(URL):** `http://123.57.52.248/` (注意：末尾必须有 `/`)
+    *   **令牌(Token):** `HelloMindsnap`
+    *   **消息加解密密钥(EncodingAESKey):** `zBgVlxIm7Wag3cn3ZMHICuT8qxUU5Kdo9lcr4MS3pP9`
+    *   **消息加解密方式:** 根据需要选择，通常为“安全模式”。
+*   **开发者文档:** [https://developers.weixin.qq.com/doc/offiaccount/Getting_Started/Overview.html](https://developers.weixin.qq.com/doc/offiaccount/Getting_Started/Overview.html)
+    *   **重要:** 阅读“基本配置”、“接收普通消息”、“被动回复用户消息”等章节。
+
+### 1.4 GitHub仓库
+*   **地址:** `https://github.com/Boulea7/Movie_recommender_wechat`
+*   本地项目初始化后，关联此远程仓库。
+
+## 2. 系统设计
+
+### 2.1 架构设计
+系统遵循论文图3-1的结构：
+1.  **用户端:** 微信用户通过微信公众号发送请求。
+2.  **微信服务器:** 作为消息中转，将用户消息POST到我们配置的后端服务器URL，并将后端服务器的响应返回给用户。
+3.  **后端应用服务器 (web.py):**
+    *   监听80端口，处理微信服务器转发过来的HTTP请求。
+    *   解析XML格式的用户消息。
+    *   根据消息内容执行相应逻辑（搜索、评价、推荐）。
+    *   与MySQL数据库交互，读取和存储数据。
+    *   执行推荐算法。
+    *   构造XML格式的响应消息返回给微信服务器。
+4.  **数据库 (MySQL):** 存储电影信息、用户信息、用户评分等。
+
+### 2.2 模块设计
+
+1.  **`main.py` (或 `app.py`):**
+    *   主应用入口。
+    *   web.py URL路由配置。
+    *   微信接口验证和消息处理类。
+    *   署名: `# Mindsnap团队的电影推荐系统分团队`
+2.  **`wechat_handler.py`:**
+    *   处理微信消息的解析 (XML到Python对象)。
+    *   处理微信消息的构建 (Python对象到XML)。
+    *   消息分发逻辑：根据消息类型和内容调用不同业务处理函数。
+    *   署名: `# Mindsnap团队的电影推荐系统分团队`
+3.  **`db_manager.py`:**
+    *   数据库连接管理 (连接池可选，初期可简单连接)。
+    *   封装CRUD操作：获取电影、用户信息，存储评分、搜索记录等。
+    *   署名: `# Mindsnap团队的电影推荐系统分团队`
+4.  **`recommendation_engine.py`:**
+    *   实现协同过滤算法 (User-CF)。
+    *   实现基于内容的推荐算法 (冷启动)。
+    *   署名: `# Mindsnap团队的电影推荐系统分团队`
+5.  **`config.py`:**
+    *   存储配置信息，如数据库连接参数、微信Token等 (敏感信息不应硬编码，优先环境变量)。
+    *   署名: `# Mindsnap团队的电影推荐系统分团队`
+6.  **`utils.py` (可选):**
+    *   存放通用工具函数，如日志记录配置、数据清洗等。
+
+### 2.3 数据库设计
+*   **数据库名:** `movie_recommendation_system`
+*   **字符集:** `utf8mb4`
+*   **表结构 (SQL DDL 见附录 A.1):**
+
+    1.  **`movies` (电影信息表):**
+        *   `id` INT AUTO_INCREMENT PRIMARY KEY
+        *   `title` VARCHAR(255) NOT NULL COMMENT '电影名称'
+        *   `douban_rating` DECIMAL(3,1) COMMENT '豆瓣评分'
+        *   `rating_count` INT COMMENT '评价人数'
+        *   `release_date` VARCHAR(100) COMMENT '上映日期/年代'
+        *   `actors` TEXT COMMENT '演员列表, 逗号分隔'
+        *   `directors` TEXT COMMENT '导演列表, 逗号分隔'
+        *   `genres` VARCHAR(255) COMMENT '类型, 逗号分隔'
+        *   `plot_summary` TEXT COMMENT '剧情简介'
+        *   `poster_url` VARCHAR(512) COMMENT '海报图片URL (可选)'
+        *   `douban_url` VARCHAR(512) COMMENT '豆瓣链接 (可选)'
+        *   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        *   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        *   UNIQUE KEY `uniq_title_release` (`title`, `release_date`(50)) COMMENT '防止完全同名同年代电影重复，酌情使用'
+
+    2.  **`users` (用户信息表):**
+        *   `id` INT AUTO_INCREMENT PRIMARY KEY
+        *   `openid` VARCHAR(128) NOT NULL UNIQUE COMMENT '微信用户OpenID'
+        *   `nickname` VARCHAR(255) COMMENT '微信昵称 (可选, 注意隐私)'
+        *   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        *   `last_active_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+
+    3.  **`ratings` (用户评分表):**
+        *   `id` INT AUTO_INCREMENT PRIMARY KEY
+        *   `user_id` INT NOT NULL COMMENT '关联users表id'
+        *   `movie_id` INT NOT NULL COMMENT '关联movies表id'
+        *   `score` DECIMAL(3,1) NOT NULL COMMENT '用户评分 (0-10)'
+        *   `rated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        *   UNIQUE KEY `uniq_user_movie_rating` (`user_id`, `movie_id`)
+        *   FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+        *   FOREIGN KEY (`movie_id`) REFERENCES `movies`(`id`) ON DELETE CASCADE
+
+    4.  **`search_logs` (用户搜索记录表 - 论文提及，可选实现):**
+        *   `id` INT AUTO_INCREMENT PRIMARY KEY
+        *   `user_id` INT NOT NULL
+        *   `search_query` VARCHAR(255) NOT NULL
+        *   `search_time` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        *   FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+
+    *Cursor请注意：在实现时，为`movies`表捏造至少200条详细的测试数据，数据应包含各种类型的电影，评分分布合理，演员导演信息尽量真实。*
+
+### 2.4 接口设计 (微信公众号 -> 后端)
+后端 `/` 路径接收微信服务器的GET和POST请求。
+
+1.  **GET请求:** 用于微信公众号服务器配置时的验证。
+    *   参数: `signature`, `timestamp`, `nonce`, `echostr`
+    *   逻辑: 验证`signature`是否合法，合法则返回`echostr`。
+2.  **POST请求:** 用于接收用户发送的消息或事件。
+    *   **请求体:** XML格式数据，包含 `ToUserName`, `FromUserName`, `CreateTime`, `MsgType`, `Content` (文本消息), `Event` (事件消息)等。
+    *   **响应体:** XML格式数据，用于被动回复用户。
+
+    **消息处理逻辑 (基于 `MsgType` 和 `Content`):**
+
+    *   **`MsgType == "text"`:**
+        *   **`Content == "推荐"`:** 调用推荐逻辑。
+        *   **`Content` 以 "评价 " 开头 (例如: "评价 肖申克的救赎 9.5"):** 解析电影名和评分，调用评价逻辑。
+        *   **其他文本:** 视为电影名搜索，调用搜索逻辑。
+    *   **`MsgType == "event"`:**
+        *   **`Event == "subscribe"` (关注事件):**
+            *   检查用户是否存在，不存在则在`users`表创建新用户。
+            *   回复欢迎语和使用说明。
+        *   **`Event == "unsubscribe"` (取消关注事件):**
+            *   （可选）记录用户取消关注，或标记用户为不活跃。论文中提到暂时保留信息。
+
+## 3. 开发步骤 (供Cursor参考)
+
+**Cursor请按以下步骤进行开发，并在项目的README.md或DEVELOPMENT_LOG.md中记录关键实现细节和代码片段。**
+
+### 3.1 初始化项目结构
+1.  创建项目根目录 `Movie_Recommender_WeChat`。
+2.  在根目录下创建Python虚拟环境 `.venv`。
+3.  创建以下目录和文件结构：
+    ```
+    Movie_Recommender_WeChat/
+    ├── .venv/
+    ├── app/                      # 应用核心代码目录
+    │   ├── __init__.py
+    │   ├── main.py               # web.py主应用和路由
+    │   ├── wechat_handler.py     # 微信消息处理
+    │   ├── db_manager.py         # 数据库交互
+    │   ├── recommendation_engine.py # 推荐算法
+    │   ├── config.py             # 配置文件 (或使用环境变量)
+    │   └── utils.py              # (可选) 工具函数
+    ├── static/                   # (可选) 静态文件 (本项目前端在微信，可能不需要)
+    ├── templates/                # (可选) 模板文件 (本项目前端在微信，可能不需要)
+    ├── tests/                    # (可选) 单元测试
+    ├── deploy.sh                 # 部署脚本
+    ├── requirements.txt          # Python依赖
+    ├── README.md
+    └── .gitignore
+    ```
+4.  初始化Git仓库，并关联到 `https://github.com/Boulea7/Movie_recommender_wechat`。
+
+### 3.2 数据库搭建与初始数据填充
+1.  在本地MySQL中创建数据库 `movie_recommendation_system` 和用户 `movie_rec_user`。
+2.  执行附录 A.1 中的SQL DDL语句创建表结构。
+3.  **关键：** 为 `movies` 表手动创建至少200条详细的电影测试数据。
+    *   **数据应包含:** `title`, `douban_rating` (0.0-10.0), `rating_count` (随机整数), `release_date` (如 "1994" 或 "2023-10-01"), `actors` (多个演员用逗号分隔), `directors` (逗号分隔), `genres` (逗号分隔，如 "剧情,犯罪"), `plot_summary` (一段简介)。
+    *   **示例SQL INSERT (少量，Cursor需生成更多):**
+        ```sql
+        INSERT INTO movies (title, douban_rating, rating_count, release_date, actors, directors, genres, plot_summary) VALUES
+        ('肖申克的救赎', 9.7, 2000000, '1994', '蒂姆·罗宾斯,摩根·弗里曼', '弗兰克·德拉邦特', '剧情,犯罪', '银行家安迪因被误判为谋杀妻子及情人而入狱...'),
+        ('霸王别姬', 9.6, 1800000, '1993', '张国荣,张丰毅,巩俐', '陈凯歌', '剧情,爱情', '程蝶衣自小被卖到京剧戏班...'),
+        ('阿甘正传', 9.5, 1700000, '1994', '汤姆·汉克斯,罗宾·怀特', '罗伯特·泽米吉斯', '剧情,爱情', '阿甘于二战结束后不久出生在美国南方阿拉巴马州一个闭塞的小镇...');
+        -- Cursor请继续生成至少197条类似数据
+        ```
+4.  为 `users` 和 `ratings` 表准备少量测试数据，例如3-5个用户，每个用户对5-10部电影有评分。
+
+### 3.3 后端基础框架 (`app/main.py`, `app/wechat_handler.py`)
+1.  **`config.py`:** 定义数据库连接信息、微信Token。
+    ```python
+    # app/config.py
+    # Mindsnap团队的电影推荐系统分团队
+
+    DB_CONFIG = {
+        'host': 'localhost', # 部署时可能为服务器IP或127.0.0.1
+        'user': 'movie_rec_user',
+        'password': 'MovieRecDbP@ssw0rd',
+        'db': 'movie_recommendation_system',
+        'charset': 'utf8mb4',
+        'cursorclass': 'pymysql.cursors.DictCursor' # 方便将查询结果转为字典
+    }
+
+    WECHAT_TOKEN = "HelloMindsnap"
+    # WECHAT_APPID = "YOUR_APPID" # 如果需要主动调用API
+    # WECHAT_APPSECRET = "YOUR_APPSECRET" # 如果需要主动调用API
+    # WECHAT_ENCODING_AES_KEY = "zBgVlxIm7Wag3cn3ZMHICuT8qxUU5Kdo9lcr4MS3pP9" # 如果使用安全模式
+    ```
+2.  **`db_manager.py`:**
+    *   实现数据库连接函数 `get_db_connection()`。
+    *   实现基础的数据库操作函数，如 `get_user_by_openid()`, `create_user()`, `get_movie_by_title()`, `add_rating()`, `get_user_ratings()`, `get_all_user_ratings()` 等。
+3.  **`wechat_handler.py`:**
+    *   实现微信消息签名验证函数 (`check_signature`)。
+    *   实现XML解析函数 (`parse_xml_message`)。
+    *   实现XML构建函数 (`build_xml_response`)。
+    *   核心消息处理逻辑 `handle_message(xml_data)`，根据消息类型和内容分发。
+4.  **`main.py`:**
+    *   设置web.py的URL路由: `urls = ('/', 'WeChatInterface')`
+    *   创建 `WeChatInterface` 类，包含 `GET` 和 `POST` 方法。
+        *   `GET`: 调用 `check_signature`，成功则返回 `echostr`。
+        *   `POST`: 接收XML数据，调用 `wechat_handler.handle_message` 处理，并返回处理结果。
+    *   应用启动逻辑 `if __name__ == "__main__": app.run()` (注意端口80需要sudo权限，或通过nginx反代)。
+
+### 3.4 核心功能实现
+1.  **用户关注与欢迎 (`wechat_handler.py`):**
+    *   处理 `subscribe` 事件，调用 `db_manager` 检查/创建用户。
+    *   回复固定的欢迎语和使用说明 (例如："欢迎使用个性化电影推荐！您可以：\n1. 输入电影名搜索，如：泰坦尼克号\n2. 评价电影，如：评价 泰坦尼克号 9\n3. 获取推荐，输入：推荐")。
+2.  **电影搜索 (`wechat_handler.py`, `db_manager.py`):**
+    *   用户输入电影名。
+    *   `db_manager`:
+        *   先尝试精确匹配 `title`。
+        *   若无结果，尝试模糊匹配 `title LIKE '%query%'`，返回最多5条。
+    *   `wechat_handler`: 格式化搜索结果（电影名、评分、简介等）并回复。若无结果，回复"未找到相关电影"。
+3.  **电影评价 (`wechat_handler.py`, `db_manager.py`):**
+    *   用户输入 "评价 电影名 评分"。
+    *   `wechat_handler`: 解析出电影名和评分 (0-10分，支持一位小数)。
+    *   `db_manager`:
+        *   根据电影名查找电影ID (若有同名电影，初期简单处理，可提示用户或默认第一个，论文提及此问题点)。
+        *   获取用户ID (根据OpenID)。
+        *   在 `ratings` 表中插入或更新评分。
+    *   `wechat_handler`: 回复 "《电影名》评分成功！" 或错误提示。
+4.  **推荐逻辑 (`recommendation_engine.py`, `wechat_handler.py`, `db_manager.py`):**
+    *   用户输入 "推荐"。
+    *   **`recommendation_engine.py`:**
+        *   **`get_user_cf_recommendations(user_id, num_recommendations=5)`:**
+            1.  从 `db_manager` 获取目标用户的评分数据。
+            2.  从 `db_manager` 获取所有其他用户的评分数据。
+            3.  **计算用户相似度 (核心):** 遍历其他用户，与目标用户比较。
+                *   找出共同评分的电影。
+                *   计算相似度（论文中提及基于评分差平方的自定义方法，或使用皮尔逊相关系数/余弦相似度）。
+                *   找到N个最相似的邻居用户。
+            4.  **生成推荐:** 从邻居用户喜欢（高评分）且目标用户未看过的电影中，选出评分预测最高的几部。
+            5.  返回推荐电影ID列表。
+        *   **`get_content_based_recommendations(user_id, num_recommendations=5)` (冷启动):**
+            1.  从 `db_manager` 获取目标用户已评分/已看过的电影。
+            2.  从 `db_manager` 获取一批高质量电影（例如，豆瓣评分Top N，且用户未看过的）。
+            3.  随机选择几部或按评分排序选择几部。
+            4.  返回推荐电影ID列表。
+    *   **`wechat_handler.py`:**
+        1.  调用 `get_user_cf_recommendations`。
+        2.  如果CF结果为空或不足，调用 `get_content_based_recommendations` 补充或替换。
+        3.  根据推荐的电影ID列表，从 `db_manager` 获取电影详细信息。
+        4.  格式化推荐结果并回复。若无任何推荐，回复 "暂时没有合适的推荐，请多评价一些电影哦！"。
+
+### 3.5 署名
+*   **Cursor请确保在 `main.py`, `wechat_handler.py`, `db_manager.py`, `recommendation_engine.py`, `config.py` 的文件开头添加注释:**
+    ```python
+    # Mindsnap团队的电影推荐系统分团队
+    ```
+
+### 3.6 `requirements.txt`
+*   在本地开发完成后，生成 `requirements.txt`:
+    ```bash
+    source .venv/bin/activate
+    pip freeze > requirements.txt
+    ```
+
+## 4. 部署文档
+
+### 4.1 准备工作
+1.  **服务器访问:** 确保可以通过SSH访问阿里云Ubuntu服务器。
+2.  **代码获取:**
+    *   在服务器上安装Git: `sudo apt install git`
+    *   克隆项目: `git clone https://github.com/Boulea7/Movie_recommender_wechat.git`
+    *   或者，如果本地开发后，将代码打包上传到服务器并解压。
+3.  **数据库准备:**
+    *   如果在云服务器上部署MySQL:
+        *   安装MySQL Server: `sudo apt install mysql-server`
+        *   安全配置: `sudo mysql_secure_installation`
+        *   登录MySQL: `sudo mysql -u root -p`
+        *   创建数据库和用户 (同本地开发)。
+            ```sql
+            CREATE DATABASE movie_recommendation_system CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+            CREATE USER 'movie_rec_user'@'localhost' IDENTIFIED BY 'YourSecureDbP@ssw0rd123!'; -- 替换为强密码
+            GRANT ALL PRIVILEGES ON movie_recommendation_system.* TO 'movie_rec_user'@'localhost';
+            FLUSH PRIVILEGES;
+            EXIT;
+            ```
+        *   导入表结构和初始数据 (如果本地有dump，可以使用 `mysql -u movie_rec_user -p movie_recommendation_system < dump.sql`)。
+    *   如果使用云数据库MySQL版，则在云控制台创建数据库和账号，并修改`app/config.py`中的DB_HOST为云数据库的连接地址。
+4.  **Python环境:**
+    *   安装pip和venv: `sudo apt install python3-pip python3-venv`
+
+### 4.2 部署脚本 (`deploy.sh`)
+**Cursor请创建 `deploy.sh` 脚本，脚本应包含详细的步骤、输出和错误检查。**
+
+**`deploy.sh` 脚本内容概要 (实际脚本由Cursor编写):**
+
+```bash
+#!/bin/bash
+
+# deploy.sh
+# Mindsnap团队的电影推荐系统分团队 部署脚本
+
+# --- 配置 ---
+PROJECT_DIR="/path/to/your/Movie_Recommender_WeChat" # 项目部署的绝对路径
+VENV_DIR="$PROJECT_DIR/.venv_prod" # 生产虚拟环境目录名
+LOG_FILE="$PROJECT_DIR/deploy.log"
+PYTHON_EXECUTABLE="python3" # 或 python3.9 等具体版本
+MAIN_SCRIPT="$PROJECT_DIR/app/main.py"
+PORT=80
+
+# --- 辅助函数 ---
+echogreen() { echo -e "\033[0;32m$1\033[0m"; }
+echored() { echo -e "\033[0;31m$1\033[0m"; }
+log() { echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"; echo "$1"; }
+
+# --- 脚本开始 ---
+exec > >(tee -a "$LOG_FILE") 2>&1 # 同时输出到控制台和日志文件
+
+log "====================================================="
+log "开始部署 Mindsnap 电影推荐系统..."
+log "====================================================="
+
+# 0. 检查root权限 (运行在80端口需要)
+if [ "$(id -u)" -ne 0 ]; then
+  echored "错误: 此脚本需要以root权限运行才能监听80端口。"
+  log "错误: 脚本需要root权限。"
+  exit 1
+fi
+log "Root权限检查通过。"
+
+# 1. 进入项目目录
+cd "$PROJECT_DIR" || { echored "错误: 项目目录 $PROJECT_DIR 不存在。"; log "错误: 项目目录不存在。"; exit 1; }
+log "当前目录: $(pwd)"
+
+# 2. (可选) 从Git拉取最新代码
+# log "正在从Git拉取最新代码..."
+# git pull origin main || { echored "错误: Git pull 失败。"; log "错误: Git pull 失败。"; exit 1; }
+# log "代码更新完毕。"
+
+# 3. 创建/激活虚拟环境
+if [ ! -d "$VENV_DIR" ]; then
+  log "创建Python虚拟环境 $VENV_DIR..."
+  "$PYTHON_EXECUTABLE" -m venv "$VENV_DIR" || { echored "错误: 创建虚拟环境失败。"; log "错误: 创建虚拟环境失败。"; exit 1; }
+  log "虚拟环境创建成功。"
+else
+  log "虚拟环境 $VENV_DIR 已存在。"
+fi
+
+log "激活虚拟环境..."
+# shellcheck disable=SC1091
+source "$VENV_DIR/bin/activate" || { echored "错误: 激活虚拟环境失败。"; log "错误: 激活虚拟环境失败。"; exit 1; }
+log "虚拟环境已激活。"
+
+# 4. 安装依赖
+log "安装项目依赖 (from requirements.txt)..."
+pip install -r requirements.txt || { echored "错误: 安装依赖失败。"; log "错误: 安装依赖失败。"; deactivate; exit 1; }
+log "依赖安装完毕。"
+
+# 5. 检查并处理80端口占用
+log "检查端口 $PORT 是否被占用..."
+LISTENING_PID=$(sudo lsof -t -i:$PORT -sTCP:LISTEN)
+
+if [ -n "$LISTENING_PID" ]; then
+  echored "警告: 端口 $PORT 正在被进程 PID: $LISTENING_PID 使用。"
+  log "警告: 端口 $PORT 被进程 $LISTENING_PID 使用。"
+  read -r -p "是否尝试结束该进程? (y/N): " choice
+  if [[ "$choice" =~ ^[Yy]$ ]]; then
+    log "尝试结束进程 $LISTENING_PID..."
+    sudo kill -9 "$LISTENING_PID" || { echored "错误: 结束进程 $LISTENING_PID 失败。"; log "错误: 结束进程失败。"; deactivate; exit 1; }
+    log "进程 $LISTENING_PID 已结束。"
+    # 短暂等待端口释放
+    sleep 2
+  else
+    echored "用户选择不结束进程。部署中止。"
+    log "用户选择不结束进程。部署中止。"
+    deactivate
+    exit 1
+  fi
+else
+  log "端口 $PORT 可用。"
+fi
+
+# 6. (可选) 数据库迁移/检查 (如果使用Alembic等工具)
+# log "执行数据库迁移..."
+# alembic upgrade head
+
+# 7. 启动应用
+log "启动应用 $MAIN_SCRIPT 监听端口 $PORT ..."
+# 使用nohup后台运行，并将输出重定向到app.log
+# 注意: web.py 内建服务器不适合生产环境，但根据论文要求，先如此实现。
+# 更好的方式是使用 Gunicorn + Nginx
+# 例如: nohup gunicorn --workers 4 --bind 0.0.0.0:$PORT app.main:app > $PROJECT_DIR/app.log 2>&1 &
+# 由于web.py的运行方式，需要这样指定
+# nohup "$PYTHON_EXECUTABLE" "$MAIN_SCRIPT" "$PORT" > "$PROJECT_DIR/app.log" 2>&1 &
+
+# web.py 应用启动通常是在 Python 脚本内部指定端口
+# 假设 main.py 接受端口作为参数或内部配置为80
+# (重要：确保 main.py 中 app.run() 部分能正确监听指定端口，或修改 main.py 使其能从命令行接收端口参数)
+# 例如，修改 main.py 的 if __name__ == "__main__":
+# import sys
+# port_to_listen = int(sys.argv[1]) if len(sys.argv) > 1 else 8080 # 默认8080，脚本传80
+# app.run(port=port_to_listen)
+# 
+# 然后脚本中这样启动 (需要root权限才能监听80)
+nohup "$VENV_DIR/bin/python" "$MAIN_SCRIPT" "$PORT" > "$PROJECT_DIR/app.log" 2>&1 &
+APP_PID=$! # 获取后台进程PID
+
+sleep 2 # 等待应用启动
+
+# 检查应用是否成功启动
+if ps -p $APP_PID > /dev/null; then
+  echogreen "应用已启动，PID: $APP_PID。日志文件: $PROJECT_DIR/app.log"
+  log "应用启动成功，PID: $APP_PID。"
+else
+  echored "错误: 应用启动失败。请检查 $PROJECT_DIR/app.log 和 $LOG_FILE 获取更多信息。"
+  log "错误: 应用启动失败。"
+  deactivate
+  exit 1
+fi
+
+log "====================================================="
+echogreen "Mindsnap 电影推荐系统部署完成！"
+log "部署完成。"
+log "====================================================="
+
+deactivate # 退出虚拟环境
+```
+**Cursor请注意 `deploy.sh` 脚本中的注释，特别是关于web.py应用启动和端口监听的部分。可能需要调整`app/main.py`使其能从命令行参数接收端口。**
+
+### 4.3 手动部署步骤 (供理解和备用)
+1.  SSH登录服务器。
+2.  `cd /path/to/your/Movie_Recommender_WeChat`
+3.  `git pull` (如果代码已在服务器) 或上传最新代码。
+4.  `python3 -m venv .venv_prod`
+5.  `source .venv_prod/bin/activate`
+6.  `pip install -r requirements.txt`
+7.  修改 `app/config.py` 中的数据库连接信息，确保指向服务器上的MySQL实例。
+8.  确保端口80未被占用: `sudo lsof -i :80`。如果被占用，`sudo kill <PID>`。
+9.  启动应用: `sudo .venv_prod/bin/python app/main.py 80` (假设`main.py`可以接收端口参数)。为保持后台运行，使用 `nohup sudo .venv_prod/bin/python app/main.py 80 > app.log 2>&1 &`。
+
+### 4.4 启动与验证
+1.  执行部署脚本: `sudo bash deploy.sh`。
+2.  检查微信公众号后台配置，确保服务器URL、Token等正确，并点击“提交”看是否验证通过。
+3.  在微信公众号中发送消息测试各项功能。
+4.  查看服务器上的应用日志 (`app.log`) 和部署日志 (`deploy.log`)。
+
+## 5. 测试文档
+
+### 5.1 测试环境
+*   **客户端:** 任意微信客户端。
+*   **公众号:** 已配置并指向部署好的后端服务的个人订阅号。
+*   **网络:** 确保手机和服务器网络通畅。
+
+### 5.2 功能测试用例
+
+| 序号 | 测试模块     | 测试场景                                     | 操作步骤                                                                | 预期结果                                                                                                                                                             | 实际结果 | 是否通过 |
+| :--- | :----------- | :------------------------------------------- | :---------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------- | :------- |
+| 1    | 用户关注     | 新用户首次关注公众号                         | 微信搜索并关注公众号                                                    | 1. 收到欢迎语和使用说明。<br>2. 后台`users`表新增该用户记录 (OpenID正确)。                                                                                              |          |          |
+| 2    | 电影搜索     | 精确搜索存在的电影                           | 发送电影名，如："肖申克的救赎"                                                | 收到该电影的详细信息 (标题、评分、简介等)。                                                                                                                                    |          |          |
+| 3    | 电影搜索     | 模糊搜索电影                                 | 发送部分电影名，如："阿甘"                                                  | 收到包含"阿甘"的电影列表 (如"阿甘正传")，或单部最匹配电影信息。若无，提示未找到。                                                                                                       |          |          |
+| 4    | 电影搜索     | 搜索不存在的电影                             | 发送一个不存在的电影名，如："一部不存在的神奇电影"                                | 收到提示："未找到相关电影"。                                                                                                                                                     |          |          |
+| 5    | 电影评价     | 对存在的电影进行首次评分                     | 发送："评价 肖申克的救赎 9.5"                                               | 1. 收到"《肖申克的救赎》评分成功！"。<br>2. 后台`ratings`表新增该用户对该电影的评分记录。                                                                                               |          |          |
+| 6    | 电影评价     | 对已评分电影修改评分                         | 再次发送："评价 肖申克的救赎 9.0"                                           | 1. 收到"《肖申克的救赎》评分成功！"。<br>2. 后台`ratings`表中对应记录的评分更新为9.0。                                                                                                |          |          |
+| 7    | 电影评价     | 评价不存在的电影                             | 发送："评价 一部不存在的神奇电影 8.0"                                       | 收到错误提示，如："未找到电影《一部不存在的神奇电影》，无法评价。"                                                                                                                      |          |          |
+| 8    | 电影评价     | 评价格式错误                                 | 发送："评价 肖申克的救赎" (缺少评分) 或 "评价 肖申克的救赎 十分" (评分非数字) | 收到格式错误提示。                                                                                                                                                             |          |          |
+| 9    | 电影评价     | 评价分数超出范围 (0-10)                      | 发送："评价 肖申克的救赎 11" 或 "评价 肖申克的救赎 -1"                         | 系统应能处理此情况，例如自动修正到边界值 (0或10) 并提示，或直接提示评分范围错误。论文中提及自动调整。                                                                                     |          |          |
+| 10   | 个性化推荐   | 用户有足够评分数据                           | (前置：用户已对多部电影评分) 发送："推荐"                                       | 收到基于协同过滤算法推荐的电影列表 (不包含已评分电影)。                                                                                                                               |          |          |
+| 11   | 个性化推荐   | 冷启动用户 (新用户或评分数据少)                | (前置：用户无评分或评分很少) 发送："推荐"                                     | 收到基于内容推荐的电影列表 (如豆瓣高分电影)。                                                                                                                                       |          |          |
+| 12   | 个性化推荐   | 推荐结果多样性 (多次请求)                    | 连续多次发送："推荐" (在评分不变情况下)                                      | 理想情况下，如果协同过滤结果稳定，则推荐结果一致。如果基于内容的推荐包含随机性，则结果可能变化。论文提及重复推荐问题，初期可能结果一致。                                                                  |          |          |
+| 13   | 微信接口验证 | 公众号后台配置提交                           | 在微信公众号后台开发者配置页面，填写URL和Token后点击“提交”                        | 提示“配置成功”或“Token验证失败”。                                                                                                                                                |          |          |
+
+## 6. 维护与展望
+
+### 6.1 常见问题与解决 (Troubleshooting)
+1.  **微信公众号配置失败/Token验证失败:**
+    *   检查服务器URL是否公网可访问，是否为80端口，末尾是否有`/`。
+    *   检查Token是否与代码中配置一致。
+    *   查看web.py应用日志，确认`GET`请求是否被正确处理。
+2.  **发送消息无响应:**
+    *   检查web.py应用是否在服务器上正常运行。
+    *   查看应用日志是否有错误。
+    *   确认微信服务器IP是否在服务器防火墙白名单中 (通常不需要，微信会主动连接)。
+    *   检查消息加解密配置是否正确（如果启用了安全模式）。
+3.  **推荐结果不佳/不准确:**
+    *   检查数据库中电影数据和用户评分数据的质量和数量。
+    *   调试推荐算法逻辑，检查相似度计算、邻居选择、推荐生成等步骤。
+    *   协同过滤算法在数据稀疏时效果较差，这是已知问题。
+4.  **部署脚本`deploy.sh`执行失败:**
+    *   确保脚本有执行权限 (`chmod +x deploy.sh`)。
+    *   逐行检查脚本命令和路径是否正确。
+    *   查看脚本输出和`deploy.log`中的错误信息。
+5.  **80端口被占用:**
+    *   使用 `sudo lsof -i :80` 或 `sudo netstat -tulnp | grep :80` 查找占用进程PID。
+    *   使用 `sudo kill <PID>` 结束进程。常见的占用者有Nginx, Apache等。
+
+### 6.2 未来可优化方向 (参考论文第五章)
+1.  **解决重复推荐:** 增加推荐历史记录表，避免短期内重复推荐相同电影。
+2.  **优化响应时间:**
+    *   对计算密集型的推荐算法（如寻找邻居）进行离线计算和缓存。
+    *   数据库查询优化，添加索引。
+3.  **改进冷启动:** 引入更完善的基于内容的推荐，如基于电影标签、导演、演员相似度的推荐，而不仅仅是豆瓣高分。
+4.  **评价功能优化:**
+    *   处理同名电影：当评价或搜索的电影有重名时，返回列表让用户选择具体是哪一部（可附带年份或导演信息）。
+    *   鼓励评分：设计机制引导用户进行更多评分。
+5.  **辅助功能增强:**
+    *   **高级搜索:** 支持按导演、演员、类型等多维度搜索。
+    *   **收藏夹功能:** 允许用户收藏电影。
+6.  **推荐算法融合:** 尝试混合推荐策略，结合User-CF, Item-CF, Content-Based甚至模型（如矩阵分解）的优点。
+7.  **日志与监控:** 完善应用日志，加入性能监控。
+8.  **健壮性:** 使用如Gunicorn或uWSGI配合Nginx部署，而不是web.py自带的开发服务器。
+
+## 附录
+
+### A.1 数据库表结构SQL (DDL)
+
+```sql
+-- Mindsnap团队的电影推荐系统分团队 - 数据库DDL
+
+-- 创建数据库 (如果尚未创建)
+-- CREATE DATABASE movie_recommendation_system CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+-- USE movie_recommendation_system;
+
+-- 1. 电影信息表 (movies)
+CREATE TABLE IF NOT EXISTS `movies` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `title` VARCHAR(255) NOT NULL COMMENT '电影名称',
+  `douban_rating` DECIMAL(3,1) COMMENT '豆瓣评分',
+  `rating_count` INT COMMENT '评价人数',
+  `release_date` VARCHAR(100) COMMENT '上映日期/年代', -- 使用VARCHAR以适应多种格式如 "1994" 或 "1994-10-10"
+  `actors` TEXT COMMENT '演员列表, 逗号分隔',
+  `directors` TEXT COMMENT '导演列表, 逗号分隔',
+  `genres` VARCHAR(255) COMMENT '类型, 逗号分隔',
+  `plot_summary` TEXT COMMENT '剧情简介',
+  `poster_url` VARCHAR(512) COMMENT '海报图片URL (可选)',
+  `douban_url` VARCHAR(512) COMMENT '豆瓣链接 (可选)',
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_movies_title` (`title`),
+  INDEX `idx_movies_genres` (`genres`),
+  INDEX `idx_movies_douban_rating` (`douban_rating`)
+  -- UNIQUE KEY `uniq_title_release` (`title`, `release_date`(50)) -- 视情况启用，release_date(50)是为VARCHAR加唯一索引的示例
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='电影信息表';
+
+-- 2. 用户信息表 (users)
+CREATE TABLE IF NOT EXISTS `users` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `openid` VARCHAR(128) NOT NULL UNIQUE COMMENT '微信用户OpenID',
+  `nickname` VARCHAR(255) COMMENT '微信昵称 (可选, 注意隐私)',
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `last_active_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后活跃时间'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户信息表';
+
+-- 3. 用户评分表 (ratings)
+CREATE TABLE IF NOT EXISTS `ratings` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `user_id` INT NOT NULL COMMENT '关联users表id',
+  `movie_id` INT NOT NULL COMMENT '关联movies表id',
+  `score` DECIMAL(3,1) NOT NULL COMMENT '用户评分 (0-10)',
+  `rated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, -- 允许用户修改评分并更新时间
+  UNIQUE KEY `uniq_user_movie_rating` (`user_id`, `movie_id`),
+  FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY (`movie_id`) REFERENCES `movies`(`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  INDEX `idx_ratings_user_id` (`user_id`),
+  INDEX `idx_ratings_movie_id` (`movie_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户评分表';
+
+-- 4. 用户搜索记录表 (search_logs - 可选实现)
+CREATE TABLE IF NOT EXISTS `search_logs` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `user_id` INT NOT NULL,
+  `search_query` VARCHAR(255) NOT NULL,
+  `search_time` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  INDEX `idx_search_logs_user_id` (`user_id`),
+  INDEX `idx_search_logs_query` (`search_query`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户搜索记录表';
+
+```
+
+---
+**Cursor, 请以此文档为指导，开始逐步实现项目。在实现过程中，请务必在`README.md`或单独的`DEVELOPMENT_LOG.md`中记录你的开发活动、遇到的问题及解决方案、关键代码片段等。**
