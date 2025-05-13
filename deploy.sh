@@ -211,18 +211,89 @@ else
   log "警告: 找不到配置文件，应用可能无法正常运行。"
 fi
 
-# 7. 启动应用
+# 7. 启动应用前检查app目录下的Python文件是否存在模块导入问题
+log "检查Python模块导入问题..."
+
+# 检查app/main.py中是否设置了正确的sys.path
+if ! grep -q "sys.path.insert" "$PROJECT_DIR/app/main.py"; then
+  log "修复app/main.py中的路径设置问题..."
+  # 备份文件
+  cp "$PROJECT_DIR/app/main.py" "$PROJECT_DIR/app/main.py.bak"
+  
+  # 添加sys.path.insert代码确保能找到模块
+  sed -i '1,10s/import sys/import sys\nimport os\n\n# 添加项目根目录到Python路径\nsys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))/' "$PROJECT_DIR/app/main.py"
+  
+  log "app/main.py已更新，已添加项目路径设置"
+fi
+
+# 检查web.application调用是否使用了globals()
+if grep -q "app = web.application(urls, locals())" "$PROJECT_DIR/app/main.py"; then
+  log "修复app/main.py中的web.application调用..."
+  # 备份文件（如果没有备份过）
+  if [ ! -f "$PROJECT_DIR/app/main.py.bak" ]; then
+    cp "$PROJECT_DIR/app/main.py" "$PROJECT_DIR/app/main.py.bak"
+  fi
+  
+  # 将locals()改为globals()
+  sed -i 's/app = web.application(urls, locals())/app = web.application(urls, globals())/' "$PROJECT_DIR/app/main.py"
+  
+  log "app/main.py已更新，web.application现在使用globals()"
+fi
+
+# 检查模块间的导入方式
+log "检查app模块间的导入方式..."
+
+# 修复db_manager.py中的导入
+DB_MANAGER_FILE="$PROJECT_DIR/app/db_manager.py"
+if [ -f "$DB_MANAGER_FILE" ] && grep -q "from app.config import" "$DB_MANAGER_FILE"; then
+  log "修复$DB_MANAGER_FILE中的导入方式..."
+  cp "$DB_MANAGER_FILE" "${DB_MANAGER_FILE}.bak"
+  sed -i 's/from app.config import/from .config import/' "$DB_MANAGER_FILE"
+  log "$DB_MANAGER_FILE已更新，修复了导入方式"
+fi
+
+# 修复wechat_handler.py中的导入
+WECHAT_HANDLER_FILE="$PROJECT_DIR/app/wechat_handler.py"
+if [ -f "$WECHAT_HANDLER_FILE" ]; then
+  if grep -q "from app.config import" "$WECHAT_HANDLER_FILE" || grep -q "from app import" "$WECHAT_HANDLER_FILE"; then
+    log "修复$WECHAT_HANDLER_FILE中的导入方式..."
+    cp "$WECHAT_HANDLER_FILE" "${WECHAT_HANDLER_FILE}.bak"
+    sed -i 's/from app.config import/from .config import/' "$WECHAT_HANDLER_FILE"
+    sed -i 's/from app import/from . import/' "$WECHAT_HANDLER_FILE"
+    log "$WECHAT_HANDLER_FILE已更新，修复了导入方式"
+  fi
+fi
+
+# 修复recommendation_engine.py中的导入
+RECOMMENDATION_FILE="$PROJECT_DIR/app/recommendation_engine.py"
+if [ -f "$RECOMMENDATION_FILE" ] && grep -q "from app import" "$RECOMMENDATION_FILE"; then
+  log "修复$RECOMMENDATION_FILE中的导入方式..."
+  cp "$RECOMMENDATION_FILE" "${RECOMMENDATION_FILE}.bak"
+  sed -i 's/from app import/from . import/' "$RECOMMENDATION_FILE"
+  log "$RECOMMENDATION_FILE已更新，修复了导入方式"
+fi
+
+# 确保__init__.py文件存在
+if [ ! -f "$PROJECT_DIR/app/__init__.py" ]; then
+  log "创建app/__init__.py文件..."
+  touch "$PROJECT_DIR/app/__init__.py"
+  log "app/__init__.py已创建"
+fi
+
+log "Python模块导入问题检查完成"
+
+# 8. 启动应用
 log "启动应用 $MAIN_SCRIPT 监听端口 $PORT ..."
 
-# 使用nohup后台运行，并将输出重定向到app.log
-nohup "$VENV_DIR/bin/python" "$MAIN_SCRIPT" "$PORT" > "$PROJECT_DIR/app.log" 2>&1 &
+# 使用nohup后台运行，直接使用Python脚本方式而非模块导入方式
+cd "$PROJECT_DIR" && nohup "$VENV_DIR/bin/python" "$PROJECT_DIR/app/main.py" "$PORT" > "$LOG_FILE" 2>&1 &
 APP_PID=$! # 获取后台进程PID
 
 sleep 3 # 等待应用启动
 
 # 检查应用是否成功启动
 if ps -p $APP_PID > /dev/null; then
-  echogreen "应用已启动，PID: $APP_PID。日志文件: $PROJECT_DIR/app.log"
+  echogreen "应用已启动，PID: $APP_PID。日志文件: $LOG_FILE"
   log "应用启动成功，PID: $APP_PID。"
   
   # 保存PID到文件，方便后续管理
@@ -233,7 +304,7 @@ if ps -p $APP_PID > /dev/null; then
   echogreen "应用访问地址: http://$server_ip/"
   echogreen "微信配置URL请使用: http://$server_ip/"
 else
-  echored "错误: 应用启动失败。请检查 $PROJECT_DIR/app.log 获取更多信息。"
+  echored "错误: 应用启动失败。请检查 $LOG_FILE 获取更多信息。"
   log "错误: 应用启动失败。"
   deactivate
   exit 1

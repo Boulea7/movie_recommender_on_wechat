@@ -5,9 +5,9 @@ import time
 import hashlib
 import logging
 import re
-from app.config import WECHAT_TOKEN, MAX_SEARCH_RESULTS, DEFAULT_RECOMMENDATIONS_COUNT
-from app import db_manager
-from app import recommendation_engine
+from .config import WECHAT_TOKEN, MAX_SEARCH_RESULTS, DEFAULT_RECOMMENDATIONS_COUNT
+from . import db_manager
+from . import recommendation_engine
 
 # 设置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -114,7 +114,7 @@ def handle_movie_search(from_user_openid, movie_title):
         
         # 如果仍无结果，返回提示信息
         if not movies:
-            return f"抱歉，未找到与"{movie_title}"相关的电影。"
+            return f"抱歉，未找到与'{movie_title}'相关的电影。"
         
         # 获取格式化的电影信息
         return db_manager.get_movie_details_for_display(movies)

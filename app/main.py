@@ -2,7 +2,15 @@
 
 import web
 import sys
+import os
 import logging
+
+# 添加项目根目录到Python路径，确保能找到模块
+# 使用更健壮的方式获取项目根目录
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
+
+# 现在可以导入模块了
 from app import wechat_handler
 from app.config import WECHAT_TOKEN
 
@@ -93,5 +101,9 @@ if __name__ == "__main__":
     
     # 创建应用实例并运行
     logger.info(f"启动微信电影推荐系统服务，监听端口: {port_to_listen}")
-    app = web.application(urls, globals())
-    app.run() 
+    try:
+        app = web.application(urls, globals())
+        app.run()
+    except Exception as e:
+        logger.error(f"应用启动失败: {e}")
+        sys.exit(1) 
